@@ -64,11 +64,15 @@ end
 
 function gmamalicious.modelExists(mdl)
 	local m = mdl:gsub("%.mdl$", "")
-	return file.Exists(m .. ".mdl", "GAME")
+	local exists = file.Exists(m .. ".mdl", "GAME")
+	if not exists then
+		print("GMA Malicious | modelExists FAILED for: " .. tostring(mdl))
+	end
+	return exists
 end
 
-local pat  = [==[.+%(%s-["|'](.+)["|'],%s-["|'](.-)["|']%s-%)]==]
-local pat2 = [==[.+%(%s-["|'](.+)["|'],%s-["|'](.-)["|'],%s-(%d+),%s-["|'](.+)["|']%s-%)]==]
+local pat  = [==[.+%(%s-["|'](.+)["|']%s-,%s-["|'](.-)["|']%s-%)]==]
+local pat2 = [==[.+%(%s-["|'](.+)["|']%s-,%s-["|'](.-)["|']%s-,%s-(%d+)%s-,%s-["|'](.+)["|']%s-.*%)]==]
 local function _playermanagerMatch(s, ext)
 	local name, mdl, a, b = s:match(ext and pat2 or pat)
 	if not (name and mdl) then return end
@@ -106,7 +110,7 @@ function gmamalicious.getPlayerModels(location, handle, showMetaLess)
 	for i, entry in ipairs(gma:filesMatching("lua/autorun/.+%.lua")) do
 		local path = entry.name
 
-		local f = file.Read(path, "GAME")
+		local f = gma:readEntry(entry) or file.Read(path, "GAME")
 		if f then
 			local lines = f:Split("\n")
 
@@ -145,7 +149,7 @@ function gmamalicious.getPlayerModels(location, handle, showMetaLess)
 	local pmerr
 
 	for i, entry in pairs(mdls) do
-		local noext = entry.name:sub(1, -5)
+		local noext = entry.name:sub(1, -5):lower()
 		local ok = extraMdlFiles[noext]
 
 		if ok then
