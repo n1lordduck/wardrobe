@@ -205,7 +205,7 @@ net.Receive("wardrobe.requestmodel", function(len, ply)
 
 	if not wsid then return end
 
-	if wardrobe.config.blacklistIds[wsid] then
+	if wardrobe.config.blacklistIds[tostring(wsid)] then
 		return print("Wardrobe | Blacklisted addon id was requested by player " .. ply:Nick() .. " (" .. wsid .. ")")
 	end
 	if wardrobe.config.blacklistFiles[mdl] then
