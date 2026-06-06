@@ -17,7 +17,7 @@ WS_DOWNLOADFAILED = 3
 WS_MISSINGFILE    = 4
 
 workshop.reverseEnum = {
-	[-1] = "Unknown",
+	[-100] = "Unknown", -- TODO: make this less ugly
 	"WS_NOFILEINFO",
 	"WS_FILETOOBIG",
 	"WS_DOWNLOADFAILED",
@@ -29,10 +29,12 @@ local IGNORE = function() end
 function workshop.err(wsid, reason)
 	workshop.currentQueueSize = workshop.currentQueueSize - 1
 
-	workshop.got[wsid] = false
+	workshop.got[wsid] = nil
 	workshop.reasons[wsid] = reason
 
-	err("Workshop | Error getting '" .. wsid  .. "', code: ", reason, " (" .. workshop.reverseEnum[reason] .. ")")
+	reason_str = workshop.reverseEnum[reason] or gmamalicious.reverseEnum[reason] or reason
+
+	err("Workshop | Error getting '" .. wsid  .. "' (" .. reason_str .. ")")
 end
 
 workshop.maxsize = wardrobe and wardrobe.config.maxFileSize or 0
@@ -55,7 +57,7 @@ do
 
 		local ok, _err = validate(wsid, fileInfo)
 		if ok == false then
-			return workshop.err(wsid, _err or -1)
+			return workshop.err(wsid, _err or -100)
 		end
 
 		print("Workshop | Downloading", wsid)
@@ -73,16 +75,34 @@ do
 					return workshop.err(wsid, WS_DOWNLOADFAILED)
 				end
 
-				-- if not file.Exists(path, "MOD") then
-				-- 	return workshop.err(wsid, WS_MISSINGFILE)
-				-- end
-
 				print("Workshop | Path:", path)
 
-				workshop.got[wsid] = nil -- why? BECAUSE IT CANNOT BE REREAD AFTER HANDLE DIES, FUCKING GARBAGE
-				workshop.reasons[wsid] = path
+				-- On Linux/Proton the path is a Wine virtual drive (e.g. S:/...)
+				-- which game.MountGMA cannot resolve. Copy to DATA so we have a real path.
+				local safePathRel = "wardrobe_cache/" .. wsid .. ".gma"
+				local safePathAbs = "data/" .. safePathRel
 
-				callback(path, fileInfo, false, true, handle)
+				if not file.IsDir("wardrobe_cache", "DATA") then
+					file.CreateDir("wardrobe_cache")
+				end
+
+				if not file.Exists(safePathAbs, "GAME") then
+					print("Workshop | Copying GMA to safe path:", safePathAbs)
+					local size = handle:Size()
+					handle:Seek(0)
+					local data = handle:Read(size)
+					if not data then
+						return workshop.err(wsid, WS_DOWNLOADFAILED)
+					end
+					file.Write(safePathRel, data)
+				else
+					print("Workshop | Safe path already exists, skipping copy")
+				end
+
+				workshop.got[wsid] = nil
+				workshop.reasons[wsid] = safePathAbs
+
+				callback(safePathAbs, fileInfo, false, true, handle)
 			end)
 
 			return
@@ -218,7 +238,7 @@ end
 function workshop.get(wsid, validateinfo, validatefile, postmount)
 	validateinfo = validateinfo or IGNORE
 	validatefile = validatefile or IGNORE
-	postmount    = postmount or IGNORE
+	postmount	= postmount or IGNORE
 
 	workshop.currentQueueSize = workshop.currentQueueSize + 1
 	print("Workshop | Attempting to get", wsid)
