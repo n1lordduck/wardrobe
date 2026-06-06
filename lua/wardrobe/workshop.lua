@@ -70,40 +70,40 @@ do
 		if date > compare_date then
 			print("Workshop | New addon format, if workshop gives up (hangs on LOADING) then you should too")
 
-				steamworks.DownloadUGC(wsid, function(path, handle)
-				    if not path then
-				        return workshop.err(wsid, WS_DOWNLOADFAILED)
-				    end
+			steamworks.DownloadUGC(wsid, function(path, handle)
+				if not path then
+					return workshop.err(wsid, WS_DOWNLOADFAILED)
+				end
 
-				    print("Workshop | Path:", path)
+				print("Workshop | Path:", path)
 
-				    -- On Linux/Proton the path is a Wine virtual drive (e.g. S:/...)
-				    -- which game.MountGMA cannot resolve. Copy to DATA so we have a real path.
-				    local safePathRel = "wardrobe_cache/" .. wsid .. ".gma"
-				    local safePathAbs = "data/" .. safePathRel
+				-- On Linux/Proton the path is a Wine virtual drive (e.g. S:/...)
+				-- which game.MountGMA cannot resolve. Copy to DATA so we have a real path.
+				local safePathRel = "wardrobe_cache/" .. wsid .. ".gma"
+				local safePathAbs = "data/" .. safePathRel
 
-				    if not file.IsDir("wardrobe_cache", "DATA") then
-				        file.CreateDir("wardrobe_cache")
-				    end
+				if not file.IsDir("wardrobe_cache", "DATA") then
+					file.CreateDir("wardrobe_cache")
+				end
 
-				    if not file.Exists(safePathAbs, "GAME") then
-				        print("Workshop | Copying GMA to safe path:", safePathAbs)
-				        local size = handle:Size()
-				        handle:Seek(0)
-				        local data = handle:Read(size)
-				        if not data then
-				            return workshop.err(wsid, WS_DOWNLOADFAILED)
-				        end
-				        file.Write(safePathRel, data)
-				    else
-				        print("Workshop | Safe path already exists, skipping copy")
-				    end
+				if not file.Exists(safePathAbs, "GAME") then
+					print("Workshop | Copying GMA to safe path:", safePathAbs)
+					local size = handle:Size()
+					handle:Seek(0)
+					local data = handle:Read(size)
+					if not data then
+						return workshop.err(wsid, WS_DOWNLOADFAILED)
+					end
+					file.Write(safePathRel, data)
+				else
+					print("Workshop | Safe path already exists, skipping copy")
+				end
 
-				    workshop.got[wsid] = nil
-				    workshop.reasons[wsid] = safePathAbs
+				workshop.got[wsid] = nil
+				workshop.reasons[wsid] = safePathAbs
 
-				    callback(safePathAbs, fileInfo, false, true, handle)
-				end)
+				callback(safePathAbs, fileInfo, false, true, handle)
+			end)
 
 			return
 		end
@@ -238,7 +238,7 @@ end
 function workshop.get(wsid, validateinfo, validatefile, postmount)
 	validateinfo = validateinfo or IGNORE
 	validatefile = validatefile or IGNORE
-	postmount    = postmount or IGNORE
+	postmount	= postmount or IGNORE
 
 	workshop.currentQueueSize = workshop.currentQueueSize + 1
 	print("Workshop | Attempting to get", wsid)
