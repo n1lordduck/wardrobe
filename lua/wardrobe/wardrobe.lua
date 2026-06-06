@@ -19,7 +19,7 @@ wardrobe.enabled      = CreateClientConVar("wardrobe_enabled",            "1" , 
 wardrobe.friendsonly  = CreateClientConVar("wardrobe_friendsonly",        "0" , true, true, "Should wardrobe only load the models of your friends?")
 wardrobe.printlogs    = CreateClientConVar("wardrobe_printlogs",          "0" , true, true, "Should wardrobe's logs be printed to the console?")
 wardrobe.alwaysLoad   = CreateClientConVar("wardrobe_ignorepvsloading",   "0" , true, true, "Should wardrobe load people's models IMMEDIATELY upon recieving the request?")
-wardrobe.autoLoad     = CreateClientConVar("wardrobe_requestlastmodel",   "0" , true, true, "Should wardrobe ask the server to give you your last model back?")
+wardrobe.autoLoad     = CreateClientConVar("wardrobe_requestlastmodel",   "1" , true, true, "Should wardrobe ask the server to give you your last model back?")
 wardrobe.showMetaLess = CreateClientConVar("wardrobe_showunlikelymodels", "0" , true, true, "Should wardrobe's menu show unlikely models when loading an addon?")
 wardrobe.maxFileSize  = CreateClientConVar("wardrobe_maxfilesize",        "-1", true, true, "What is the maximum size an addon should be (in MiB)? -1 means the server decides.")
 
@@ -43,8 +43,8 @@ end
 wardrobe.hasLoaded = false
 wardrobe.guiLoaded = false
 
-function wardrobe.notif(msg)
-	hook.Run("Wardrobe_Notification", msg)
+function wardrobe.notif(msg, silent)
+	hook.Run("Wardrobe_Notification", msg, silent)
 end
 
 local function _concat(tbl, sep)
@@ -82,11 +82,8 @@ function wardrobe.getAddon(wsid, callback, ignoreMetaLess)
 
 			if not white then
 				local ok, err = gmamalicious.preDownload(wsid, info)
-				err = gmamalicious.reverseEnum[err] or gmaparser.reverseEnum[err] or err
 				if not ok then
-					wardrobe.err("Wardrobe | GMAM refused download with error code '" .. err .. "'.")
-
-					return false
+					return false, err
 				end
 			end
 		end,
@@ -96,11 +93,8 @@ function wardrobe.getAddon(wsid, callback, ignoreMetaLess)
 
 			if not done and not white then
 				local ok, err = gmamalicious.isGMAOkay(path, handle, wardrobe.config.aggressive, wardrobe.config.maxFileSize)
-				err = gmamalicious.reverseEnum[err] or gmaparser.reverseEnum[err] or err
 				if not ok then
-					wardrobe.err("Wardrobe | GMAM rejected addon with error code '" .. err .. "'.")
-
-					return false
+					return false, err
 				end
 			end
 		end,
@@ -135,7 +129,7 @@ local function _fullUpdate()
 end
 
 local function _renderRagdoll(rag)
-	if rag.wardrobe then
+	if rag.wardrobe and !hook.Run("Wardrobe_RagdollModelOverride", rag, rag:GetModel()) then
 		rag:SetModel(rag.wardrobe)
 
 		if wardrobe.ragdolls[rag] then
@@ -147,6 +141,7 @@ local function _renderRagdoll(rag)
 end
 
 local function _forceModel(ply)
+	if hook.Run("Wardrobe_PlayerModelOverride", ply, ply.originalModel) then return end
 	local mdl = ply.wardrobe
 	if mdl then
 		ply:SetModel(mdl)
@@ -155,10 +150,11 @@ local function _forceModel(ply)
 end
 
 local function _forceRag(rag)
+	if hook.Run("Wardrobe_RagdollModelOverride", rag, rag:GetModel()) then return end
 	local mdl = rag.wardrobe
 	if mdl then
 		rag:InvalidateBoneCache()
-			rag:SetModel(mdl)
+		rag:SetModel(mdl)
 		rag:InvalidateBoneCache()
 	end
 end
@@ -405,6 +401,8 @@ function wardrobe.requestSkin(n)
 	net.Start("wardrobe.requestskin")
 		net.WriteUInt(n, 8)
 	net.SendToServer()
+
+	wardrobe.notif("Your model has been updated.", true)
 end
 
 function wardrobe.requestModel(wsid, mdl, handsinfo)
@@ -417,8 +415,6 @@ function wardrobe.requestModel(wsid, mdl, handsinfo)
 			net.WriteString("0")
 			net.WriteString("")
 		net.SendToServer()
-
-		file.Delete("wardrobe_last.txt")
 		return
 	end
 
@@ -430,13 +426,10 @@ function wardrobe.requestModel(wsid, mdl, handsinfo)
 
 	wardrobe.handsInfoLookup[mdl] = handsinfo
 
-	local serial = mdl .. ";" .. wsid -- TODO: Also need to store bodygroups here
-	if handsinfo and handsinfo[1] then
-		serial = serial .. ";" .. table.concat(handsinfo, ";")
-	else
-		serial = serial .. ";gone;0;0"
+	if wardrobe.history.get(mdl) then
+		wardrobe.history.get(mdl).last_used = os.time()
+		wardrobe.history.save()
 	end
-	file.Write("wardrobe_last.txt", serial)
 end
 
 function wardrobe.isFriend(ply)
@@ -657,27 +650,20 @@ function wardrobe.load()
 
 	if shouldSync then wardrobe.requestSync() end
 
-	local s = file.Read("wardrobe_last.txt", "DATA") -- TODO: Update when new data is added
-	if s and #s > 0 then
-		local mdl, wsid, hands, skin, bodygroups = s:match([==[(.+);(%d+);(.+);(%d);(%d+)]==])
-		wsid = tonumber(wsid)
-		if not (mdl and wsid and bodygroups) then return end
+	wardrobe.history.load()
 
+	last = wardrobe.history.last()
+	if last then
+		wsid = tonumber(last.wsid)
 		if shouldSync then
-			local handsinfo
-			if hands ~= "gone" then
-				handsinfo = {hands, skin, bodygroups}
-			end
-
 			wardrobe.getAddon(wsid, function(...) -- Make sure its mounted for local client
 				if wardrobe.autoLoad:GetBool() then
-					wardrobe.requestModel(wsid, mdl, handsinfo)
+					wardrobe.requestModel(wsid, last.model, last.hands)
 				end
 
 				wardrobe.lastAddonInfo = {...}
 			end, not wardrobe.showMetaLess:GetBool())
 		end
-
 		wardrobe.lastAddon = wsid
 	end
 

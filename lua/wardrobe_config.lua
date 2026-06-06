@@ -15,26 +15,37 @@ wardrobe.config.defaultLanguage = "english"
 -- the extension will not load if you dont have support for whatever it extends
 -- so dont worry about having multiple things enabled
 wardrobe.config.extensions = {
+	"basewars",
+	"clockwork",
 	"darkrp",
-	-- "basewars",
-	-- "ulx",
-	-- "sam",
-	-- "serverguard",
-	-- "pointshop",
-	-- "pointshop2",
-	-- "clockwork",
-	-- "hoverboards",
+	"fatkid",
+	"hoverboards",
+	"morbus",
+	"pointshop",
+	"pointshop2",
+	"sam",
+	"serverguard",
+	"terrortown",
+	"ulx",
+	"zombiesurvival",
 }
 
 -- commandPrefix: Pattern to match the command prefix, [!|/] (the default) means ! or /
 -- this can be any single character but patterns must be escaped (. -> %., + -> %+)
 -- or a group of characters enclosed in [] and seperated by |
 -- see https://www.lua.org/pil/20.2.html for more info
-wardrobe.config.commandPrefix = "[!|/]"
+wardrobe.config.commandPrefix = "[!.%/%\\]"
+wardrobe.config.commandPrefixHide = "[%/%\\]"
 
 -- command: The command that comes after the prefix to match
 -- !"wardrobe", /"costume" et cetra
-wardrobe.config.command = "wardrobe"
+wardrobe.config.command = {
+							"wardrobe",
+							"outfit",
+							"outfitter",
+							"model",
+							"costume",
+						}
 
 -- blacklistIds: Paths of files which should never be mounted
 -- please don't add your personal dislikes here, as users can blacklist addons they don't
@@ -52,7 +63,7 @@ wardrobe.config.blacklistFiles = {
 -- WARNING: Inverse table, form: [wsid] = true,
 wardrobe.config.blacklistIds = {
 	--[13377] = true,
-	[834368988] = true, -- invisible playermodel
+	[1136617425] = true, -- invisible playermodel
 }
 
 -- userSpecificModels: Any models or workshop ids which only specifc users should be allowed

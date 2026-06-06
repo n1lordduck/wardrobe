@@ -18,23 +18,6 @@ function wardrobe.gui.buildNewSheet(name, icon, pan)
 	return panel, newSheet
 end
 
-function wardrobe.gui.buildNewSettingsSheet(name, icon, pan)
-	if not IsValid(wardrobe.gui.frame) then
-		wardrobe.gui.constructFramework()
-		wardrobe.gui.buildDefaultSheets()
-	end
-
-	local panel = vgui.Create(pan or "DScrollPanel", wardrobe.gui.frame.sheet.settings)
-		function panel:Paint(w, h) end
-
-		panel:Dock(FILL)
-		panel:DockMargin(8, 8, 8, 8)
-
-	local newSheet = wardrobe.gui.frame.sheet.settings:AddSheet(name, panel, icon)
-
-	return panel, newSheet
-end
-
 function wardrobe.gui.getModel()
 	local pmdl = LocalPlayer():GetModel()
 
@@ -205,16 +188,22 @@ do
 	end
 end
 
-function wardrobe.gui.setPreviewModel(mdl)
+function wardrobe.gui.setPreviewModel(mdl, wsid)
 	local frame = wardrobe.gui.frame
 	if not IsValid(frame) then return end
 
 	wardrobe.gui.previewing = true
 
-	local panel = frame.model
-	DModelPanel.SetModel(panel, mdl)
+	wardrobe.getAddon(wsid, function(_, _, _, mdls, meta)
+		local panel = frame.model
+		DModelPanel.SetModel(panel, mdl)
 
-	wardrobe.gui.populateBodygroupsPanel(false)
+		function panel.Entity:GetPlayerColor()
+			return LocalPlayer():GetPlayerColor()
+		end
+
+		wardrobe.gui.populateBodygroupsPanel(false)
+	end, not wardrobe.showMetaLess:GetBool())
 end
 
 function wardrobe.gui.resetPreviewModel(dontUsePly)
@@ -232,6 +221,10 @@ function wardrobe.gui.resetPreviewModel(dontUsePly)
 	frame.sheet.selector.preview:SetEnabled(false)
 
 	frame.model:SetModel(LocalPlayer():GetModel())
+
+	function frame.model.Entity:GetPlayerColor()
+		return LocalPlayer():GetPlayerColor()
+	end
 
 	wardrobe.gui.populateBodygroupsPanel(not dontUsePly)
 end
@@ -254,6 +247,8 @@ function wardrobe.gui.previewModelRequestDone()
 end
 
 function wardrobe.gui.updateSkinAndBodygroups(updateFromZero)
+	hands = LocalPlayer():GetHands()
+
 	if wardrobe.gui.shouldUpdateBodygroups then
 		if updateFromZero then
 			wardrobe.requestBodygroups(wardrobe.gui.bodygroupUpdate)
@@ -266,8 +261,9 @@ function wardrobe.gui.updateSkinAndBodygroups(updateFromZero)
 
 	if wardrobe.gui.shouldUpdateSkin then
 		wardrobe.requestSkin(wardrobe.gui.skinUpdate)
-	else
-		wardrobe.requestSkin(0)
+		if hands and hands:IsValid() then 
+			hands:SetSkin(wardrobe.gui.skinUpdate)
+		end
 	end
 
 	wardrobe.gui.bodygroupUpdate = {}
@@ -292,6 +288,7 @@ function wardrobe.gui.addNewModels(id, md, meta)
 	wardrobe.frontend.parseModels(md, meta, c)
 end
 
+wardrobe.gui.downloadButtonTextColor = Color(0, 0, 0, 255)
 function wardrobe.gui.constructBrowser()
 	if IsValid(wardrobe.gui.browser) then return end
 
@@ -305,8 +302,6 @@ function wardrobe.gui.constructBrowser()
 
 		f:SetTitle("")
 
-		function f:Paint() end
-
 	f.controls = vgui.Create("DHTMLControls", f)
 	local c = f.controls
 		c:Dock(TOP)
@@ -316,13 +311,20 @@ function wardrobe.gui.constructBrowser()
 		h:Dock(FILL)
 		h:OpenURL(wardrobe.config.workshopDefaultUrl)
 		-- h:SetAllowLua(true)
+		
+		-- TODO: Separate button logic to its own method
+		h:AddFunction("wardrobe", "selectaddon", function (wsid)
+			if f.select then 
+				f.select:DoClick()
+			end
+		end)
 
 		do
 			local timerid = "WardrobeAddonHeuristics"
-			local compare_date = os.time({year = 2020, month = 1, day = 20, hour = 0, min = 0, sec = 0})
 
 			function h:addonSelectHeuristics(btn)
 				local addon = self.addon
+				btn.bgcolor = Color(240, 240, 240, 255)
 				btn:SetEnabled(false)
 				btn:SetText(L"Performing Steamworks heuristics, please wait...")
 
@@ -343,12 +345,10 @@ function wardrobe.gui.constructBrowser()
 
 					if data.error then
 						btn:SetText(L"Steamworks had an error: " .. tostring(data.error) .. " (" .. addon .. ")")
-					elseif date > compare_date then
-						btn:SetEnabled(true)
-						btn:SetText(L"Select Addon! Warning: new format, may be issues! " .. " (" .. addon .. ")")
+						btn.bgcolor = Color(255, 120, 120, 255)
 					else
 						btn:SetEnabled(true)
-						btn:SetText(L"Select Addon!" .. " (" .. addon .. ")")
+						btn:SetText(L"Click here to select addon!" .. " (" .. addon .. ")")
 					end
 				end)
 			end
@@ -365,6 +365,7 @@ function wardrobe.gui.constructBrowser()
 					if IsValid(f.select) then
 						timer.Remove(timerid)
 						f.select:SetText(L"Please select an addon.")
+						f.select.bgcolor = Color(240, 240, 240, 255)
 						f.select:SetEnabled(false)
 					end
 
@@ -374,6 +375,8 @@ function wardrobe.gui.constructBrowser()
 				self.addon = wsid
 				if IsValid(f.select) then
 					self:addonSelectHeuristics(f.select)
+					h:RunJavascript("document.getElementById(\"SubscribeItemOptionAdd\").innerHTML = \"Select addon\"")
+					h:RunJavascript("function SubscribeItem(wsid, game) { wardrobe.selectaddon( parseInt(wsid) ) }")
 				end
 			end
 		end
@@ -381,8 +384,14 @@ function wardrobe.gui.constructBrowser()
 	f.select = vgui.Create("DButton", f)
 	local b = f.select
 		b:Dock(BOTTOM)
-		b:SetHeight(24)
+		b:SetHeight(72)
+		-- Space button more evenly in lower resolutions
+		local button_margin = math.max(0, f:GetWide()/2 - 350)
+		b:DockMargin(button_margin, 4, button_margin, 0 )
+		b:SetFont("DermaLarge")
 		b:SetText(L"Please select an addon.")
+		b:SetColor(wardrobe.gui.downloadButtonTextColor)
+		b.bgcolor = Color(240, 240, 240, 255)
 
 		function b:DoClick()
 			local wsid = h.addon
@@ -398,7 +407,21 @@ function wardrobe.gui.constructBrowser()
 				h:OpenURL(wardrobe.config.workshopDefaultUrl)
 				c.AddressBar:SetText(wardrobe.config.workshopDefaultUrl)
 				self:SetText(L"Please select an addon.")
+				b.bgcolor = Color(240, 240, 240, 255)
 			end
+		end
+
+		function b:Paint(w, h)
+			if self:IsEnabled() then
+				self.bgcolor = Color(120, 255, 120, 255)
+				if self.Hovered then 
+					self.bgcolor = Color(180, 255, 180, 255)
+				end
+				if self:IsDown() or self.m_bSelected then
+					self.bgcolor = Color(30, 200, 30, 255)
+				end
+			end
+			draw.RoundedBox( 8, 0, 0, w, h, self.bgcolor )
 		end
 
 	c:SetHTML(h)
@@ -440,11 +463,12 @@ function wardrobe.gui.constructFramework()
 			local tw, _ = surface.GetTextSize(L"Workshop: Working...")
 			tw = tw + 16
 
-			local bgColor = Color(255, 255, 255, 155)
+			local bgColor = Color(255, 255, 255, 255)
 			function f:Paint(w, h)
 				SKIN.tex.Window.Normal(4, 2, w - 8, 20, bgColor)
 
 				local work = workshop.isWorking()
+				draw.RoundedBox( 4, 0, 0, w, h, Color( 100, 100, 100, 255 ) )
 				draw.SimpleText(
 					work and L"Workshop: Working..." or L"Workshop: Idle",
 					"DermaDefault",
@@ -475,7 +499,7 @@ function wardrobe.gui.constructFramework()
 		m.rotateYScale = 0.3
 		m.scrollScale  = 1.1
 
-		local bgColor = Color(255, 255, 255, 155)
+		local bgColor = Color(255, 255, 255, 255)
 		function m:Paint(w, h)
 			SKIN.tex.Tab_Control(0, 0, w, h, bgColor)
 
@@ -518,6 +542,10 @@ function wardrobe.gui.constructFramework()
 		local ply = LocalPlayer()
 		m:SetModel(ply:GetModel())
 
+		function m.Entity:GetPlayerColor()
+			return ply:GetPlayerColor()
+		end
+
 		for i = 0, ply:GetNumBodyGroups() - 1 do
 			m.Entity:SetBodygroup(i, ply:GetBodygroup(i))
 		end
@@ -546,8 +574,20 @@ function wardrobe.gui.buildSelectionSheet(selector)
 			local path = r:GetColumnText(3)
 
 			local menu = DermaMenu(self)
-			if path then menu:AddOption(L"Copy Model",       function() SetClipboardText(path) end):SetIcon("icon16/page_copy.png") end
-			if wsid then menu:AddOption(L"Copy Workshop ID", function() SetClipboardText(wsid) end):SetIcon("icon16/page_code.png") end
+
+			if table.getn(self:GetSelected()) == 1 then
+				if path then menu:AddOption(L"Copy Model",       function() SetClipboardText(path) end):SetIcon("icon16/page_copy.png") end
+				if wsid then menu:AddOption(L"Copy Workshop ID", function() SetClipboardText(wsid) end):SetIcon("icon16/page_code.png") end
+			end
+
+			menu:AddOption(L"Remove Model"..(table.getn(self:GetSelected()) > 1 and "s" or ""), function()
+				for i, k in ipairs(self:GetSelected()) do
+					wardrobe.history.remove(k:GetColumnText(3))
+					self:RemoveLine(k:GetID())
+				end
+				wardrobe.history.save()
+			end):SetIcon("icon16/cross.png")
+
 			menu:Open()
 
 			self.listMenu = menu
@@ -559,8 +599,28 @@ function wardrobe.gui.buildSelectionSheet(selector)
 			local c = function(path, name, hands)
 				l.handslookup[path] = hands
 				l:AddLine(id or "id_gone", name or "???", path, hands and L"Yes" or L"No")
+
+				local mdl_hist = {}
+				mdl_hist.wsid = id
+				mdl_hist.name = name
+				mdl_hist.model = path
+				mdl_hist.hands = hands
+
+				wardrobe.history.add(mdl_hist)
+				wardrobe.history.save()
 			end
 			wardrobe.frontend.parseModels(md, meta, c)
+		end
+
+	selector.browser = vgui.Create("DButton", selector)
+	local bb = selector.browser
+		bb:Dock(TOP)
+		bb:SetHeight(24)
+
+		bb:SetText(L"Open Workshop Browser")
+
+		function bb:DoClick()
+			wardrobe.gui.openBrowser()
 		end
 
 	selector.request = vgui.Create("DButton", selector)
@@ -600,6 +660,7 @@ function wardrobe.gui.buildSelectionSheet(selector)
 
 			rb:SetText(L"Request Model")
 			rb:SetEnabled(false)
+			pb:SetEnabled(wardrobe.gui.previewing)
 
 			return
 		end
@@ -610,9 +671,7 @@ function wardrobe.gui.buildSelectionSheet(selector)
 
 		rb:SetText(string.format("%s '%s'", L"Request", r:GetColumnText(2)))
 		rb:SetEnabled(true)
-
 		pb:SetEnabled(true)
-
 		return DListView.OnRowSelected(self, i, r)
 	end
 
@@ -627,7 +686,7 @@ function wardrobe.gui.buildSelectionSheet(selector)
 		bg:Dock(TOP)
 		bg:SetHeight(150)
 
-		local bgColor = Color(255, 255, 255, 155)
+		local bgColor = Color(255, 255, 255, 255)
 		function bg:Paint(w, h)
 			SKIN.tex.Tab_Control(0, 0, w, h, bgColor)
 		end
@@ -636,7 +695,7 @@ function wardrobe.gui.buildSelectionSheet(selector)
 		if wardrobe.gui.previewing then
 			wardrobe.gui.resetPreviewModel()
 		elseif l.selected and l.selected ~= LocalPlayer():GetModel() then
-			wardrobe.gui.setPreviewModel(l.selected)
+			wardrobe.gui.setPreviewModel(l.selected, tonumber(l.wsid))
 
 			self:SetText(L"Cancel Previewing")
 		end
@@ -662,11 +721,11 @@ function wardrobe.gui.buildSelectionSheet(selector)
 
 		function ubgb:DoClick()
 			wardrobe.gui.updateSkinAndBodygroups()
-
 			self:SetEnabled(false)
 		end
 
 	selector:AddItem(l)
+	selector:AddItem(bb)
 	selector:AddItem(rb)
 	selector:AddItem(pb)
 
@@ -676,21 +735,6 @@ function wardrobe.gui.buildSelectionSheet(selector)
 	selector:AddItem(ubgb)
 
 	wardrobe.gui.populateBodygroupsPanel(true)
-end
-
-function wardrobe.gui.buildDownloadSheet(download)
-	download.browser = vgui.Create("DButton", download)
-	local b = download.browser
-		b:Dock(TOP)
-		b:SetHeight(24)
-
-		b:SetText(L"Open Workshop Browser")
-
-		function b:DoClick()
-			wardrobe.gui.openBrowser()
-		end
-
-	download:AddItem(b)
 end
 
 function wardrobe.gui.buildBlacklistSheet(blacklist)
@@ -881,69 +925,65 @@ function wardrobe.gui.buildBlacklistSheet(blacklist)
 	l:update()
 end
 
-function wardrobe.gui.buildDownloadSheet(download)
-	download.browser = vgui.Create("DButton", download)
-	local b = download.browser
-		b:Dock(TOP)
-		b:SetHeight(24)
-
-		b:SetText(L"Open Workshop Browser")
-
-		function b:DoClick()
-			wardrobe.gui.openBrowser()
-		end
-
-	download:AddItem(b)
-end
-
 wardrobe.gui.optionConvars = {
 	{
 		con = "wardrobe_enabled",
-		off = "Completely Disable Wardrobe",
-		on  = "Enable Wardrobe",
+		text = "Enable wardrobe",
 	},
 	{
 		con = "wardrobe_friendsonly",
-		off = "Use Everyone's Custom Model",
-		on  = "Only Use My Friends's Custom Models",
+		text = "Only Use Friends",
 	},
 	{
 		con = "wardrobe_showunlikelymodels",
-		off = "Hide Unlikely Models",
-		on  = "Show Unlikely Models",
+		text = "Show Unlikely",
 	},
 	{
 		con = "wardrobe_requestlastmodel",
-		off = "Disable 'Last Model' Autoload",
-		on  = "Enable 'Last Model' Autoload",
+		text = "Enable Autoload",
 	},
 	{
 		con = "wardrobe_ignorepvsloading",
-		off = "Load Custom Models As Players Become Visible",
-		on  = "Load Custom Models Regardless of Visibility",
+		text = "Always Load Models",
 	},
 }
 
 if GetConVar("wardrobe_loadgmodlegs") then
 	table.insert(wardrobe.gui.optionConvars, {
 		con = "wardrobe_loadgmodlegs",
-		off = "Don't Load Legs",
-		on  = "Load Legs",
+		text = "Load Legs",
 	})
 end
 
+wardrobe.gui.optionsSheetTextColor = Color(0, 0, 0, 255)
 function wardrobe.gui.buildOptionsSheet(options)
 	for _, v in ipairs(wardrobe.gui.optionConvars) do
 		local dcl = vgui.Create("DCheckBoxLabel", options)
 			dcl:Dock(TOP)
 			dcl:DockMargin(0, 0, 0, 4)
-
 			dcl:SetConVar(v.con)
-
-			function dcl:Think()
-				self:SetText(self:GetChecked() and L(v.off) or L(v.on))
-			end
+			dcl:SetText(L(v.text))
+			dcl:SetTextColor( wardrobe.gui.optionsSheetTextColor )
 	end
+
+   options.language = vgui.Create("DImageButton", options)
+   local pb = options.language
+		   pb:SetSize(28, 16)
+
+		   pb:SetIcon("flags16/" .. wardrobe.language.icon() .. ".png")
+
+		   function pb:DoClick()
+				   if IsValid(self.langs) then
+						   return self.langs:Remove()
+				   end
+
+				   self.langs = wardrobe.openLanguages(options)
+		   end
+
+	function options:PerformLayout()
+	   pb:SetPos(self:GetWide() - 28 - 2, 2)
+    end
+
 end
 
 function wardrobe.rebuildMenu()
@@ -995,60 +1035,21 @@ function wardrobe.gui.buildDefaultSheets()
 	local selector = sheet.selector
 		wardrobe.gui.buildSelectionSheet(selector)
 
-	sheet.download = wardrobe.gui.buildNewSheet(L"Download", "icon16/basket_put.png")
-	local download = sheet.download
-		wardrobe.gui.buildDownloadSheet(download)
+	sheet.blacklist = wardrobe.gui.buildNewSheet(L"Blacklist", "icon16/user_delete.png", "DPanel")
+	local blacklist    = sheet.blacklist
+		wardrobe.gui.buildBlacklistSheet(blacklist)
 
-	local settingsTab
-	sheet.settings, settingsTab = wardrobe.gui.buildNewSheet("", "icon16/cog.png", "DPropertySheet")
-	local settings = sheet.settings
-		function settingsTab.Tab:PerformLayout()
-			self:ApplySchemeSettings()
+	sheet.options   = wardrobe.gui.buildNewSheet(L"Options",   "icon16/wrench.png")
+	local options      = sheet.options
+		wardrobe.gui.buildOptionsSheet(options)
 
-			self.Image:SetPos(10, 3)
+	sheet.about     = wardrobe.gui.buildNewSheet(L"About",     "icon16/help.png", "DPanel")
+	local about        = sheet.about
+		about.html = vgui.Create("DHTML", about)
+			local h = about.html
+				h:Dock(FILL)
 
-			if not self:IsActive() then
-				self.Image:SetImageColor(Color(255, 255, 255, 155))
-			else
-				self.Image:SetImageColor(Color(255, 255, 255, 255))
-			end
-		end
-
-		settings.language = vgui.Create("DImageButton", settings)
-		local pb = settings.language
-			pb:SetSize(28, 16)
-
-			pb:SetIcon("flags16/" .. wardrobe.language.icon() .. ".png")
-
-			function pb:DoClick()
-				if IsValid(self.langs) then
-					return self.langs:Remove()
-				end
-
-				self.langs = wardrobe.openLanguages(settings)
-			end
-
-		function settings:PerformLayout()
-			pb:SetPos(self:GetWide() - 28 - 2, 2)
-
-			DPropertySheet.PerformLayout(self)
-		end
-
-		settings.options   = wardrobe.gui.buildNewSettingsSheet(L"Options",   "icon16/wrench.png")
-		local options      = settings.options
-			wardrobe.gui.buildOptionsSheet(options)
-
-		settings.blacklist = wardrobe.gui.buildNewSettingsSheet(L"Blacklist", "icon16/user_delete.png", "DPanel")
-		local blacklist    = settings.blacklist
-			wardrobe.gui.buildBlacklistSheet(blacklist)
-
-		settings.about     = wardrobe.gui.buildNewSettingsSheet(L"About",     "icon16/help.png", "DPanel")
-		local about        = settings.about
-			about.html = vgui.Create("DHTML", about)
-				local h = about.html
-					h:Dock(FILL)
-
-					h:OpenURL("http://hexahedron.pw/wardrobe.html")
+				h:OpenURL("http://hexahedron.pw/wardrobe.html")
 end
 
 function wardrobe.openMenu()
@@ -1067,18 +1068,18 @@ function wardrobe.openMenu()
 		elseif wardrobe.lastAddon then
 			-- Load the last addon into the list
 
-			if wardrobe.lastAddonInfo then
-				wardrobe.gui.addNewModels(wardrobe.lastAddon, wardrobe.lastAddonInfo[4], wardrobe.lastAddonInfo[5])
-			else
-				wardrobe.getAddon(wardrobe.lastAddon, function(_, _, _, mdls, meta)
-					wardrobe.gui.addNewModels(wardrobe.lastAddon, mdls, meta)
-				end, not wardrobe.showMetaLess:GetBool())
+			if wardrobe.history then
+				local panel = wardrobe.gui.frame.sheet.selector.list
+				for k, v in pairs(wardrobe.history) do
+					panel:AddLine(v.wsid, v.name, k, v.hands and L"Yes" or L"No")
+				end
 			end
 		end
 
 		wardrobe.guiLoaded = true
 	end
 
+	wardrobe.gui.previewing = wardrobe.gui.previewing or false
 	wardrobe.gui.frame:SetVisible(true)
 end
 
@@ -1114,17 +1115,6 @@ function wardrobe.gui.receiveUpdate(ply, model)
 end
 hook.Add("Wardrobe_PostSetModel", "wardrobe", wardrobe.gui.receiveUpdate)
 
-function wardrobe.gui.menuCommand(ply, str)
-	if ply ~= LocalPlayer() then return end
-
-	str = str:Trim()
-	local f = str:find((wardrobe.config.commandPrefix or "[!|/]") .. (wardrobe.config.command or "wardrobe"))
-	if f == 1 then
-		wardrobe.openMenu()
-	end
-end
-hook.Add("OnPlayerChat", "wardrobe", wardrobe.gui.menuCommand)
-
 function wardrobe.gui.output(code, text)
 	-- not much yet
 
@@ -1134,9 +1124,12 @@ function wardrobe.gui.output(code, text)
 end
 hook.Add("Wardrobe_Output", "wardrobe.gui", wardrobe.gui.output)
 
-function wardrobe.gui.notif(msg)
+function wardrobe.gui.notif(msg, silent)
 	notification.AddLegacy(L(msg), NOTIFY_HINT, 6)
-	surface.PlaySound("buttons/button11.wav")
+
+	if not silent then
+		surface.PlaySound("buttons/button11.wav")
+	end
 end
 hook.Add("Wardrobe_Notification", "wardrobe.gui", wardrobe.gui.notif)
 
